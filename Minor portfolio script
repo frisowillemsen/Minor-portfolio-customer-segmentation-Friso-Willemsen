@@ -1,0 +1,131 @@
+##loading packages and starting with data preperation:
+
+import pandas as pd
+import numpy as np
+
+# Load the modified dataset with the appropriate encoding and delimiter
+data = pd.read_csv('/Users/frisowillemsen/Desktop/Portfolio minor/Online Retail.csv', encoding='latin1', delimiter=';')
+
+
+# Check for missing values
+missing_values = data.isnull()
+
+# Count the missing values in each column
+missing_counts = missing_values.sum()
+
+# Display the missing value counts
+print(missing_counts)
+
+
+##Searching for outliers
+# Select only the numeric columns for z-score calculation
+numeric_columns = data.select_dtypes(include=np.number)
+
+# Compute z-scores for the numeric columns
+z_scores = (numeric_columns - numeric_columns.mean()) / numeric_columns.std()
+
+# Set a threshold for the z-score above which a data point is considered an outlier (e.g., 3)
+z_score_threshold = 3
+
+# Filter out outliers by applying the z-score threshold to each numeric column
+filtered_data = data[~((z_scores > z_score_threshold).any(axis=1))]
+
+# Display the filtered data
+print(filtered_data)
+
+
+##Data preperation for FMR analysis
+
+# Convert the 'InvoiceDate' column to datetime
+data['InvoiceDate'] = pd.to_datetime(data['InvoiceDate'], format='%d-%m-%Y %H:%M')
+
+# Calculate Recency
+last_date = data['InvoiceDate'].max()
+data['Recency'] = (last_date - data['InvoiceDate']).dt.days
+
+# Calculate Frequency
+frequency = data.groupby('CustomerID')['InvoiceDate'].nunique().reset_index()
+frequency.columns = ['CustomerID', 'Frequency']
+
+# Calculate Monetary Value
+monetary = data.groupby('CustomerID')['UnitPrice'].sum().reset_index()
+monetary.columns = ['CustomerID', 'Monetary']
+
+# Merge RFM metrics
+rfm = pd.merge(frequency, monetary, on='CustomerID')
+
+# Merge Recency column
+rfm = pd.merge(rfm, data[['CustomerID', 'Recency']], on='CustomerID')
+
+# Drop rows with NaN values in 'Monetary' column
+rfm = rfm.dropna(subset=['Monetary'])
+
+# Clean and convert 'Monetary' column to numeric
+rfm['Monetary'] = rfm['Monetary'].str.replace(',', '').astype(float)
+
+# Create segments based on quartiles
+quartiles = rfm.quantile(q=[0.25, 0.5, 0.75])
+rfm['R_Score'] = pd.qcut(rfm['Recency'], q=[0, 0.25, 0.5, 0.75, 1], labels=False)
+rfm['F_Score'] = pd.qcut(rfm['Frequency'], q=[0, 0.25, 0.5, 0.75, 1], labels=False)
+rfm['M_Score'] = pd.qcut(rfm['Monetary'], q=[0, 0.25, 0.5, 0.75, 1], labels=False)
+
+# Combine RFM scores
+rfm['RFM_Segment'] = rfm['R_Score'].astype(str) + rfm['F_Score'].astype(str) + rfm['M_Score'].astype(str)
+rfm['RFM_Score'] = rfm[['R_Score', 'F_Score', 'M_Score']].sum(axis=1)
+
+# Assign segment labels
+segment_labels = ['Inactive', 'Churned', 'Promising', 'High-Value']
+rfm['Segment'] = pd.cut(rfm['RFM_Score'], bins=[0, 2, 4, 6, 9], labels=segment_labels)
+
+# Display the RFM analysis results
+print(rfm)
+
+
+
+#Because the value error in the last piece of code i made some adjustments to control if there are any errors with the new created monetary column
+
+duplicate_monetary = rfm.duplicated(subset='Monetary')
+rfm = rfm.drop_duplicates(subset='Monetary')
+
+print(rfm[duplicate_monetary])
+
+
+
+#With this code I controlled the number of NAN values in Monetary
+missing_monetary = rfm['Monetary'].isna().sum()
+print("Number of NaN values in 'Monetary' column:", missing_monetary)
+
+
+
+
+
+
+#Because there were 0 NAN values in monetary I tried to look into the INF values and replace them as NAN. When Replaced for NAN,
+# they were removed as NaN
+
+# Replace inf values with NaN
+rfm['Monetary'] = rfm['Monetary'].replace(np.inf, np.nan)
+
+# Drop rows with NaN values in the Monetary column
+rfm = rfm.dropna(subset=['Monetary'])
+
+# Calculate RFM scores
+rfm['R_Score'] = pd.qcut(rfm['Recency'], q=[0, 0.25, 0.5, 0.75, 1], labels=False)
+rfm['F_Score'] = pd.qcut(rfm['Frequency'], q=[0, 0.25, 0.5, 0.75, 1], labels=False)
+rfm['M_Score'] = pd.qcut(rfm['Monetary'], q=[0, 0.25, 0.5, 0.75, 1], labels=False)
+
+# Combine RFM scores
+rfm['RFM_Score'] = rfm['R_Score'].astype(str) + rfm['F_Score'].astype(str) + rfm['M_Score'].astype(str)
+
+
+#Making last adjustments to solve error
+rfm = rfm.drop_duplicates(subset='Frequency')
+rfm['Monetary'] = rfm['Monetary'].replace(np.inf, np.nan)
+rfm = rfm.dropna(subset=['Monetary'])
+rfm['R_Score'] = pd.qcut(rfm['Recency'], q=[0, 0.25, 0.5, 0.75, 1], labels=False)
+rfm['F_Score'] = pd.qcut(rfm['Frequency'], q=[0, 0.25, 0.5, 0.75, 1], labels=False)
+rfm['M_Score'] = pd.qcut(rfm['Monetary'], q=[0, 0.25, 0.5, 0.75, 1], labels=False)
+
+
+# Print the final dataframe
+print(rfm)
